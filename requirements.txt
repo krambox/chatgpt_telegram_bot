@@ -11,3 +11,4 @@ requests
 tiktoken
 lxml
 youtube_transcript_api
+pypdf2
