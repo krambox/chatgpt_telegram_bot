@@ -86,3 +86,9 @@ You can be in this list: <a href="https://github.com/karfly/chatgpt_telegram_bot
 
 ## References
 1. [*Build ChatGPT from GPT-3*](https://learnprompting.org/docs/applied_prompting/build_chatgpt)
+
+
+
+cd /volume1/docker/chatgpt_telegram_bot/
+docker-compose --env-file config/config.env up --build
+docker-compose --env-file config/config.env up --build -d

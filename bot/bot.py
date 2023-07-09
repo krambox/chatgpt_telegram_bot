@@ -6,6 +6,7 @@ import html
 import json
 import tempfile
 import pydub
+import tools
 from pathlib import Path
 from datetime import datetime
 import azure.cognitiveservices.speech as speechsdk
@@ -145,6 +146,30 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
         try:
             message = message or update.message.text
+            logger.info(message)
+            if message.startswith('https://www.youtube.com/watch?v='):
+                await update.message.reply_text("Analyzing video...")
+                description,transcript=tools.yt(message)
+                logger.info(description)
+                logger.info(tools.tokens(description))
+                logger.info(tools.tokens(transcript))
+                await reset_dialog_handle(update, context)
+                transcript=tools.summarize(transcript,10000)
+                message=f'''{description}
+                Analysiere folgendes Video. Fasse die Beschreibung, oder das  Transscript falls es keine Beschreibung gibt,
+                in einem Absatz mit maximal 40 Wörter zusammen.
+
+                Beschreibung: 
+                """
+                {description}
+                """
+
+                Transscript: 
+                """
+                {transcript}
+                """
+                '''
+                
 
             dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
             parse_mode = {
@@ -293,6 +318,15 @@ async def voice_message_handle(update: Update, context: CallbackContext):
     db.set_user_attribute(user_id, "n_used_tokens", n_used_tokens + db.get_user_attribute(user_id, "n_used_tokens"))
 
 
+async def reset_dialog_handle(update: Update, context: CallbackContext,force=False):
+    
+    user_id = update.message.from_user.id
+    db.set_user_attribute(user_id, "last_interaction", datetime.now())
+
+    db.start_new_dialog(user_id)
+   
+
+
 async def new_dialog_handle(update: Update, context: CallbackContext):
     await register_user_if_not_exists(update, context, update.message.from_user)
     if await is_previous_message_not_answered_yet(update, context): return
@@ -302,7 +336,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
 
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
-
+    user_id = update.message.from_user.id
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
     await update.message.reply_text(f"{openai_utils.CHAT_MODES[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 

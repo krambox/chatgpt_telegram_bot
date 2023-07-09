@@ -4,6 +4,7 @@ import tiktoken
 import openai
 openai.api_key = config.openai_api_key
 
+model='gpt-3.5-turbo-16k'
 
 CHAT_MODES = config.chat_modes
 
@@ -15,6 +16,19 @@ OPENAI_COMPLETION_OPTIONS = {
     "presence_penalty": 0
 }
 
+#support optional parameter system_role
+def complete(prompt: str, system_role: str = None,max_tokens=1000) -> str:
+  m=[]
+  if system_role:
+    m.append({'role': 'system', 'content': system_role})
+  m.append({'role': 'user', 'content': prompt})
+  response = openai.ChatCompletion.create(
+      messages=m,
+      model=model,
+      temperature=0,
+      max_tokens=max_tokens
+  )
+  return response.choices[0]['message']['content']
 
 class ChatGPT:
     def __init__(self, use_chatgpt_api=True):
@@ -31,7 +45,7 @@ class ChatGPT:
                 if self.use_chatgpt_api:
                     messages = self._generate_prompt_messages_for_chatgpt_api(message, dialog_messages, chat_mode)
                     r = await openai.ChatCompletion.acreate(
-                        model="gpt-3.5-turbo",
+                        model=model,
                         messages=messages,
                         **OPENAI_COMPLETION_OPTIONS
                     )
@@ -70,7 +84,7 @@ class ChatGPT:
                 if self.use_chatgpt_api:
                     messages = self._generate_prompt_messages_for_chatgpt_api(message, dialog_messages, chat_mode)
                     r_gen = await openai.ChatCompletion.acreate(
-                        model="gpt-3.5-turbo",
+                        model=model,
                         messages=messages,
                         stream=True,
                         **OPENAI_COMPLETION_OPTIONS

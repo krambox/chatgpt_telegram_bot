@@ -6,3 +6,8 @@ pymongo==4.3.3
 python-dotenv==0.21.0
 pydub==0.25.1
 azure-cognitiveservices-speech>=1.26
+beautifulsoup4
+requests
+tiktoken
+lxml
+youtube_transcript_api
