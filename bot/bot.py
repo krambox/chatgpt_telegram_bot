@@ -87,10 +87,10 @@ async def start_handle(update: Update, context: CallbackContext):
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
     db.start_new_dialog(user_id)
     
-    reply_text = "Hi! I'm <b>ChatGPT</b> bot implemented with GPT-3.5 OpenAI API 🤖\n\n"
+    reply_text = "Hi! Ich bin <b>Botty</b>  🤖\n\n"
     reply_text += HELP_MESSAGE
 
-    reply_text += "\nAnd now... ask me anything!"
+    reply_text += "\nUnd los... frag mich was!"
     
     await update.message.reply_text(reply_text, parse_mode=ParseMode.HTML)
 
@@ -188,6 +188,9 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
                     except telegram.error.BadRequest as e:
                         if str(e).startswith("Message must be non-empty"):  # first answer chunk from openai was empty
                             i = -1  # try again to send first message
+                            continue
+                        elif len(answer)<=0:
+                            i = -1
                             continue
                         else:
                             sent_message = await update.message.reply_text(answer)
@@ -361,6 +364,7 @@ async def edited_message_handle(update: Update, context: CallbackContext):
 
 
 async def error_handle(update: Update, context: CallbackContext) -> None:
+
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
     try:
@@ -374,14 +378,14 @@ async def error_handle(update: Update, context: CallbackContext) -> None:
             "</pre>\n\n"
             f"<pre>{html.escape(tb_string)}</pre>"
         )
-
-        # split text into multiple messages due to 4096 character limit
-        for message_chunk in split_text_into_chunks(message, 4096):
-            try:
-                await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
-            except telegram.error.BadRequest:
-                # answer has invalid characters, so we send it without parse_mode
-                await context.bot.send_message(update.effective_chat.id, message_chunk)
+        if update:
+          # split text into multiple messages due to 4096 character limit
+          for message_chunk in split_text_into_chunks(message, 4096):
+              try:
+                  await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
+              except telegram.error.BadRequest:
+                  # answer has invalid characters, so we send it without parse_mode
+                  await context.bot.send_message(update.effective_chat.id, message_chunk)
     except:
         await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
 
