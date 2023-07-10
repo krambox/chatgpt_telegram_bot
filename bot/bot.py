@@ -82,6 +82,7 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
 
   if user.id not in user_semaphores:
     user_semaphores[user.id] = asyncio.Semaphore(1)
+  db.set_user_attribute(user.id, "last_interaction", datetime.now())
   return user.id
 
 
@@ -99,7 +100,6 @@ async def is_previous_message_not_answered_yet(update: Update, context: Callback
 async def start_handle(update: Update, context: CallbackContext):
   user_id=await register_user_if_not_exists(update, context, update.message.from_user)
 
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
   db.start_new_dialog(user_id)
 
   reply_text = "Hi! Ich bin <b>Botty</b>  🤖\n\n"
@@ -113,7 +113,6 @@ async def start_handle(update: Update, context: CallbackContext):
 async def help_handle(update: Update, context: CallbackContext):
   user_id = await register_user_if_not_exists(update, context, update.message.from_user)
 
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
   await update.message.reply_text(HELP_MESSAGE, parse_mode=ParseMode.HTML)
 
 
@@ -121,8 +120,6 @@ async def retry_handle(update: Update, context: CallbackContext):
   user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
-
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
   if len(dialog_messages) == 0:
@@ -154,7 +151,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
       if (datetime.now() - db.get_user_attribute(user_id, "last_interaction")).seconds > config.new_dialog_timeout and len(db.get_dialog_messages(user_id)) > 0:
         db.start_new_dialog(user_id)
         await update.message.reply_text(f"Starting new dialog due to timeout (<b>{openai_utils.CHAT_MODES[chat_mode]['name']}</b> mode) ✅", parse_mode=ParseMode.HTML)
-    db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
     # send typing action
     await update.message.chat.send_action(action="typing")
@@ -310,8 +306,6 @@ async def voice_message_handle(update: Update, context: CallbackContext):
   if await is_previous_message_not_answered_yet(update, context):
     return
 
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
   voice = update.message.voice
   with tempfile.TemporaryDirectory() as tmp_dir:
     tmp_dir = Path(tmp_dir)
@@ -349,11 +343,9 @@ async def voice_message_handle(update: Update, context: CallbackContext):
   db.set_user_attribute(user_id, "n_used_tokens", n_used_tokens + db.get_user_attribute(user_id, "n_used_tokens"))
 
 
-async def reset_dialog_handle(update: Update, context: CallbackContext, force=False):
-
+async def reset_dialog_handle(update: Update, context: CallbackContext):
   user_id = update.message.from_user.id
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
   db.start_new_dialog(user_id)
 
 
@@ -362,22 +354,17 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
   if await is_previous_message_not_answered_yet(update, context):
     return
 
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
-
   db.start_new_dialog(user_id)
   await update.message.reply_text("Starting new dialog ✅")
-  user_id = update.message.from_user.id
+  
   chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
   await update.message.reply_text(f"{openai_utils.CHAT_MODES[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 
 
 async def show_chat_modes_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
-
-  user_id = update.message.from_user.id
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   keyboard = []
   for chat_mode, chat_mode_dict in openai_utils.CHAT_MODES.items():
@@ -403,8 +390,6 @@ async def set_chat_mode_handle(update: Update, context: CallbackContext):
 
 async def show_balance_handle(update: Update, context: CallbackContext):
   user_id=await register_user_if_not_exists(update, context, update.message.from_user)
-
-  db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   n_used_tokens = db.get_user_attribute(user_id, "n_used_tokens")
 
