@@ -196,7 +196,7 @@ async def stream_response(gen, update: Update, context: CallbackContext, parse_m
   return answer,n_used_tokens,n_first_dialog_messages_removed
 
 
-async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
+async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True,tts=False):
   logger.info(update)
   # check if message is edited
   if update.edited_message is not None:
@@ -283,6 +283,12 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
       gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
       answer,n_used_tokens,n_first_dialog_messages_removed = await stream_response(gen, update, context, parse_mode)
+
+        # TTS
+      if tts and len(answer) > 0:
+        logger.info('TTS')
+        result = speech_synthesizer.speak_text_async(answer).get()
+        await update.message.reply_voice(result.audio_data)
       
       # update user data
       new_dialog_message = {"user": message, "bot": answer, "date": datetime.now()}
@@ -306,7 +312,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
       else:
         text = f"✍️ <i>Note:</i> Your current dialog is too long, so <b>{n_first_dialog_messages_removed} first messages</b> were removed from the context.\n Send /new command to start new dialog"
       await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-    return answer
+    
+
+ 
+
 
 
 async def voice_message_handle(update: Update, context: CallbackContext):
@@ -333,15 +342,7 @@ async def voice_message_handle(update: Update, context: CallbackContext):
 
   text = f"🎤: <i>{transcribed_text}</i>"
   await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-
-  answere = await message_handle(update, context, message=transcribed_text)
-
-  # TTS
-  if len(answere) > 0:
-    logger.info('TTS')
-    result = speech_synthesizer.speak_text_async(answere).get()
-    await update.message.reply_voice(result.audio_data)
-
+  await message_handle(update, context, message=transcribed_text,tts=True)
   # calculate spent dollars
   n_spent_dollars = voice.duration * (config.whisper_price_per_1_min / 60)
 
