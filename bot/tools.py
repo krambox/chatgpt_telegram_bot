@@ -15,7 +15,7 @@ def yt(url):
     description = patternDec.findall(str(soup))[0].replace('\\n','\n')
 
     from youtube_transcript_api import YouTubeTranscriptApi
-    video_id = url.split("?v=")[-1]
+    video_id = url.split("?v=")[-1] if "?v=" in url else url.split("/")[-1]
     srt = YouTubeTranscriptApi.get_transcript(video_id, languages=['de','en'])
     transcript = ""
     for chunk in srt:
