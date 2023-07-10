@@ -87,7 +87,7 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
 
 
 async def is_previous_message_not_answered_yet(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
 
   if user_semaphores[user_id].locked():
     text = "⏳ Please <b>wait</b> for a reply to the previous message"
@@ -98,7 +98,7 @@ async def is_previous_message_not_answered_yet(update: Update, context: Callback
 
 
 async def start_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
 
   db.start_new_dialog(user_id)
 
@@ -117,7 +117,7 @@ async def help_handle(update: Update, context: CallbackContext):
 
 
 async def speek_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
@@ -133,7 +133,7 @@ async def speek_handle(update: Update, context: CallbackContext):
 
 
 async def retry_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
@@ -148,6 +148,54 @@ async def retry_handle(update: Update, context: CallbackContext):
   await message_handle(update, context, message=last_dialog_message["user"], use_new_dialog_timeout=False)
 
 
+async def stream_response(gen, update: Update, context: CallbackContext, parse_mode):
+   # send message to user
+  prev_answer = ""
+  i = -1
+  async for gen_item in gen:
+    i += 1
+
+    status = gen_item[0]
+    if status == "not_finished":
+      status, answer = gen_item
+    elif status == "finished":
+      status, answer, n_used_tokens, n_first_dialog_messages_removed = gen_item
+    else:
+      raise ValueError(f"Streaming status {status} is unknown")
+
+    answer = answer[:4096]  # telegram message limit
+    if i == 0:  # send first message (then it'll be edited if message streaming is enabled)
+      try:
+        sent_message = await update.message.reply_text(answer, parse_mode=parse_mode)
+      except telegram.error.BadRequest as e:
+        if str(e).startswith("Message must be non-empty"):  # first answer chunk from openai was empty
+          i = -1  # try again to send first message
+          continue
+        elif len(answer) <= 0:
+          i = -1
+          continue
+        else:
+          sent_message = await update.message.reply_text(answer)
+    else:  # edit sent message
+      # update only when 100 new symbols are ready
+      if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
+        continue
+
+      try:
+        await context.bot.edit_message_text(answer, chat_id=sent_message.chat_id, message_id=sent_message.message_id, parse_mode=parse_mode)
+      except telegram.error.BadRequest as e:
+        if str(e).startswith("Message is not modified"):
+          continue
+        else:
+          await context.bot.edit_message_text(answer, chat_id=sent_message.chat_id, message_id=sent_message.message_id)
+
+      await asyncio.sleep(0.01)  # wait a bit to avoid flooding
+
+    prev_answer = answer
+
+  return answer,n_used_tokens,n_first_dialog_messages_removed
+
+
 async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True):
   logger.info(update)
   # check if message is edited
@@ -155,7 +203,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     await edited_message_handle(update, context)
     return
 
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
@@ -232,64 +280,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
       }[openai_utils.CHAT_MODES[chat_mode]["parse_mode"]]
 
       chatgpt_instance = openai_utils.ChatGPT(use_chatgpt_api=config.use_chatgpt_api)
-      if config.enable_message_streaming:
-        gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
-      else:
-        answer, n_used_tokens, n_first_dialog_messages_removed = await chatgpt_instance.send_message(
-            message,
-            dialog_messages=dialog_messages,
-            chat_mode=chat_mode
-        )
 
-        async def fake_gen():
-          yield "finished", answer, n_used_tokens, n_first_dialog_messages_removed
-
-        gen = fake_gen()
-
-      # send message to user
-      prev_answer = ""
-      i = -1
-      async for gen_item in gen:
-        i += 1
-
-        status = gen_item[0]
-        if status == "not_finished":
-          status, answer = gen_item
-        elif status == "finished":
-          status, answer, n_used_tokens, n_first_dialog_messages_removed = gen_item
-        else:
-          raise ValueError(f"Streaming status {status} is unknown")
-
-        answer = answer[:4096]  # telegram message limit
-        if i == 0:  # send first message (then it'll be edited if message streaming is enabled)
-          try:
-            sent_message = await update.message.reply_text(answer, parse_mode=parse_mode)
-          except telegram.error.BadRequest as e:
-            if str(e).startswith("Message must be non-empty"):  # first answer chunk from openai was empty
-              i = -1  # try again to send first message
-              continue
-            elif len(answer) <= 0:
-              i = -1
-              continue
-            else:
-              sent_message = await update.message.reply_text(answer)
-        else:  # edit sent message
-          # update only when 100 new symbols are ready
-          if abs(len(answer) - len(prev_answer)) < 100 and status != "finished":
-            continue
-
-          try:
-            await context.bot.edit_message_text(answer, chat_id=sent_message.chat_id, message_id=sent_message.message_id, parse_mode=parse_mode)
-          except telegram.error.BadRequest as e:
-            if str(e).startswith("Message is not modified"):
-              continue
-            else:
-              await context.bot.edit_message_text(answer, chat_id=sent_message.chat_id, message_id=sent_message.message_id)
-
-          await asyncio.sleep(0.01)  # wait a bit to avoid flooding
-
-        prev_answer = answer
-
+      gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
+      answer,n_used_tokens,n_first_dialog_messages_removed = await stream_response(gen, update, context, parse_mode)
+      
       # update user data
       new_dialog_message = {"user": message, "bot": answer, "date": datetime.now()}
       db.set_dialog_messages(
@@ -315,10 +309,8 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     return answer
 
 
-
-
 async def voice_message_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
@@ -366,19 +358,19 @@ async def reset_dialog_handle(update: Update, context: CallbackContext):
 
 
 async def new_dialog_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
   db.start_new_dialog(user_id)
   await update.message.reply_text("Starting new dialog ✅")
-  
+
   chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
   await update.message.reply_text(f"{openai_utils.CHAT_MODES[chat_mode]['welcome_message']}", parse_mode=ParseMode.HTML)
 
 
 async def show_chat_modes_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
@@ -391,7 +383,7 @@ async def show_chat_modes_handle(update: Update, context: CallbackContext):
 
 
 async def set_chat_mode_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
+  user_id = await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
 
   query = update.callback_query
   await query.answer()
@@ -405,7 +397,7 @@ async def set_chat_mode_handle(update: Update, context: CallbackContext):
 
 
 async def show_balance_handle(update: Update, context: CallbackContext):
-  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
 
   n_used_tokens = db.get_user_attribute(user_id, "n_used_tokens")
 
@@ -487,7 +479,7 @@ def run_bot() -> None:
 
   application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter, message_handle))
   application.add_handler(MessageHandler(filters.Document.PDF & ~filters.COMMAND & user_filter, message_handle))
-  
+
   application.add_handler(CommandHandler("retry", retry_handle, filters=user_filter))
   application.add_handler(CommandHandler("speek", speek_handle, filters=user_filter))
   application.add_handler(CommandHandler("new", new_dialog_handle, filters=user_filter))
