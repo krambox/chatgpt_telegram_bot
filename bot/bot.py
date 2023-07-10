@@ -193,10 +193,59 @@ async def stream_response(gen, update: Update, context: CallbackContext, parse_m
 
     prev_answer = answer
 
-  return answer,n_used_tokens,n_first_dialog_messages_removed
+  return answer, n_used_tokens, n_first_dialog_messages_removed
 
 
-async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True,tts=False):
+async def handle_pdf(update: Update, context: CallbackContext):
+  text_file = ''
+  await reset_dialog_handle(update, context)
+  await update.message.reply_text("Analyzing pdf...")
+  new_file = await update.message.effective_attachment.get_file()
+  await new_file.download_to_drive('file.pdf')
+  # await update.message.document.get_file().download_to_drive('file.pdf');
+  with open('file.pdf', 'rb') as pdf_file:
+    read_pdf = PyPDF2.PdfReader(pdf_file)
+
+    number_of_pages = len(read_pdf.pages)
+    for page_number in range(number_of_pages):   # use xrange in Py2
+      page = read_pdf.pages[page_number]
+      page_content = page.extract_text()
+      text_file += page_content
+    text_file = tools.summarize(text_file, 10000)
+    return f'''
+        Analysiere folgendes PDF. Fasse es in einem Absatz mit maximal 40 Wörter zusammen.
+
+        """
+        {text_file}
+        """
+        '''
+
+
+async def handle_yt(update: Update, context: CallbackContext,url):
+  await update.message.reply_text("Analyzing video...")
+  description, transcript = tools.yt(url)
+  logger.info(description)
+  logger.info(tools.tokens(description))
+  logger.info(tools.tokens(transcript))
+  await reset_dialog_handle(update, context)
+  transcript = tools.summarize(transcript, 10000)
+  return f'''{description}
+    Analysiere folgendes Video. Fasse die Beschreibung, oder das  Transscript falls es keine Beschreibung gibt,
+    in einem Absatz mit maximal 40 Wörter zusammen.
+
+    Beschreibung: 
+    """
+    {description}
+    """
+
+    Transscript: 
+    """
+    {transcript}
+    """
+    '''
+
+
+async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True, tts=False):
   logger.info(update)
   # check if message is edited
   if update.edited_message is not None:
@@ -223,55 +272,13 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
       if update.message.document is not None:
         fn = update.message.document.file_name
         if fn.endswith('.pdf'):
-          text_file = ''
-          # with open("file.pdf", 'wb') as f:
-          await reset_dialog_handle(update, context)
-          await update.message.reply_text("Analyzing pdf...")
-          new_file = await update.message.effective_attachment.get_file()
-          await new_file.download_to_drive('file.pdf')
-          # await update.message.document.get_file().download_to_drive('file.pdf');
-          with open('file.pdf', 'rb') as pdf_file:
-            read_pdf = PyPDF2.PdfReader(pdf_file)
-
-            number_of_pages = len(read_pdf.pages)
-            for page_number in range(number_of_pages):   # use xrange in Py2
-              page = read_pdf.pages[page_number]
-              page_content = page.extract_text()
-              text_file += page_content
-            text_file = tools.summarize(text_file, 10000)
-            message = f'''
-                Analysiere folgendes PDF. Fasse es in einem Absatz mit maximal 40 Wörter zusammen.
-
-                """
-                {text_file}
-                """
-                '''
+          message = await handle_pdf(update, context)
 
       else:
         message = message or update.message.text
         logger.info(message)
-        if message.startswith('https://www.youtube.com/watch?v='):
-          await update.message.reply_text("Analyzing video...")
-          description, transcript = tools.yt(message)
-          logger.info(description)
-          logger.info(tools.tokens(description))
-          logger.info(tools.tokens(transcript))
-          await reset_dialog_handle(update, context)
-          transcript = tools.summarize(transcript, 10000)
-          message = f'''{description}
-                  Analysiere folgendes Video. Fasse die Beschreibung, oder das  Transscript falls es keine Beschreibung gibt,
-                  in einem Absatz mit maximal 40 Wörter zusammen.
-
-                  Beschreibung: 
-                  """
-                  {description}
-                  """
-
-                  Transscript: 
-                  """
-                  {transcript}
-                  """
-                  '''
+        if message.startswith('https://www.youtube.com/watch?v=') or message.startswith('https://youtu.be/'):
+          message = await handle_yt(update, context,message)
 
       dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
       parse_mode = {
@@ -282,14 +289,14 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
       chatgpt_instance = openai_utils.ChatGPT(use_chatgpt_api=config.use_chatgpt_api)
 
       gen = chatgpt_instance.send_message_stream(message, dialog_messages=dialog_messages, chat_mode=chat_mode)
-      answer,n_used_tokens,n_first_dialog_messages_removed = await stream_response(gen, update, context, parse_mode)
+      answer, n_used_tokens, n_first_dialog_messages_removed = await stream_response(gen, update, context, parse_mode)
 
-        # TTS
+      # TTS
       if tts and len(answer) > 0:
         logger.info('TTS')
         result = speech_synthesizer.speak_text_async(answer).get()
         await update.message.reply_voice(result.audio_data)
-      
+
       # update user data
       new_dialog_message = {"user": message, "bot": answer, "date": datetime.now()}
       db.set_dialog_messages(
@@ -312,10 +319,6 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
       else:
         text = f"✍️ <i>Note:</i> Your current dialog is too long, so <b>{n_first_dialog_messages_removed} first messages</b> were removed from the context.\n Send /new command to start new dialog"
       await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-    
-
- 
-
 
 
 async def voice_message_handle(update: Update, context: CallbackContext):
@@ -342,7 +345,7 @@ async def voice_message_handle(update: Update, context: CallbackContext):
 
   text = f"🎤: <i>{transcribed_text}</i>"
   await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-  await message_handle(update, context, message=transcribed_text,tts=True)
+  await message_handle(update, context, message=transcribed_text, tts=True)
   # calculate spent dollars
   n_spent_dollars = voice.duration * (config.whisper_price_per_1_min / 60)
 
