@@ -116,6 +116,22 @@ async def help_handle(update: Update, context: CallbackContext):
   await update.message.reply_text(HELP_MESSAGE, parse_mode=ParseMode.HTML)
 
 
+async def speek_handle(update: Update, context: CallbackContext):
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+  if await is_previous_message_not_answered_yet(update, context):
+    return
+
+  dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
+  if len(dialog_messages) == 0:
+    await update.message.reply_text("No message to retry 🤷‍♂️")
+    return
+
+  last_dialog_message = dialog_messages.pop()
+  logger.info(last_dialog_message)
+  result = speech_synthesizer.speak_text_async(last_dialog_message["bot"]).get()
+  await update.message.reply_voice(result.audio_data)
+
+
 async def retry_handle(update: Update, context: CallbackContext):
   user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
@@ -443,6 +459,7 @@ async def post_init(application: Application):
       BotCommand("/new", "Start new dialog"),
       BotCommand("/mode", "Select chat mode"),
       BotCommand("/retry", "Re-generate response for previous query"),
+      BotCommand("/speek", "Re-generate voice for previous query"),
       BotCommand("/balance", "Show balance"),
       BotCommand("/help", "Show help message"),
   ])
@@ -472,6 +489,7 @@ def run_bot() -> None:
   application.add_handler(MessageHandler(filters.Document.PDF & ~filters.COMMAND & user_filter, message_handle))
   
   application.add_handler(CommandHandler("retry", retry_handle, filters=user_filter))
+  application.add_handler(CommandHandler("speek", speek_handle, filters=user_filter))
   application.add_handler(CommandHandler("new", new_dialog_handle, filters=user_filter))
 
   application.add_handler(MessageHandler(filters.VOICE & user_filter, voice_message_handle))
