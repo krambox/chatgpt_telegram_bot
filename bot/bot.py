@@ -66,7 +66,7 @@ def split_text_into_chunks(text, chunk_size):
     yield text[i:i + chunk_size]
 
 
-async def register_user_if_not_exists(update: Update, context: CallbackContext, user: User):
+async def register_user_if_not_exists(update: Update, context: CallbackContext, user: User) -> int:
   if not db.check_if_user_exists(user.id):
     db.add_new_user(
         user.id,
@@ -82,11 +82,22 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
 
   if user.id not in user_semaphores:
     user_semaphores[user.id] = asyncio.Semaphore(1)
+  return user.id
+
+
+async def is_previous_message_not_answered_yet(update: Update, context: CallbackContext):
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
+
+  if user_semaphores[user_id].locked():
+    text = "⏳ Please <b>wait</b> for a reply to the previous message"
+    await update.message.reply_text(text, reply_to_message_id=update.message.id, parse_mode=ParseMode.HTML)
+    return True
+  else:
+    return False
 
 
 async def start_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
-  user_id = update.message.from_user.id
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
 
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
   db.start_new_dialog(user_id)
@@ -100,18 +111,17 @@ async def start_handle(update: Update, context: CallbackContext):
 
 
 async def help_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
-  user_id = update.message.from_user.id
+  user_id = await register_user_if_not_exists(update, context, update.message.from_user)
+
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
   await update.message.reply_text(HELP_MESSAGE, parse_mode=ParseMode.HTML)
 
 
 async def retry_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
-  user_id = update.message.from_user.id
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
@@ -132,11 +142,10 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     await edited_message_handle(update, context)
     return
 
-  await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
-  user_id = update.message.from_user.id
   chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
 
   async with user_semaphores[user_id]:
@@ -294,24 +303,13 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     return answer
 
 
-async def is_previous_message_not_answered_yet(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
-
-  user_id = update.message.from_user.id
-  if user_semaphores[user_id].locked():
-    text = "⏳ Please <b>wait</b> for a reply to the previous message"
-    await update.message.reply_text(text, reply_to_message_id=update.message.id, parse_mode=ParseMode.HTML)
-    return True
-  else:
-    return False
 
 
 async def voice_message_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
-  user_id = update.message.from_user.id
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   voice = update.message.voice
@@ -360,11 +358,10 @@ async def reset_dialog_handle(update: Update, context: CallbackContext, force=Fa
 
 
 async def new_dialog_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
   if await is_previous_message_not_answered_yet(update, context):
     return
 
-  user_id = update.message.from_user.id
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   db.start_new_dialog(user_id)
@@ -391,8 +388,7 @@ async def show_chat_modes_handle(update: Update, context: CallbackContext):
 
 
 async def set_chat_mode_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
-  user_id = update.callback_query.from_user.id
+  user_id=await register_user_if_not_exists(update.callback_query, context, update.callback_query.from_user)
 
   query = update.callback_query
   await query.answer()
@@ -406,9 +402,8 @@ async def set_chat_mode_handle(update: Update, context: CallbackContext):
 
 
 async def show_balance_handle(update: Update, context: CallbackContext):
-  await register_user_if_not_exists(update, context, update.message.from_user)
+  user_id=await register_user_if_not_exists(update, context, update.message.from_user)
 
-  user_id = update.message.from_user.id
   db.set_user_attribute(user_id, "last_interaction", datetime.now())
 
   n_used_tokens = db.get_user_attribute(user_id, "n_used_tokens")
