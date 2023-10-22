@@ -1,3 +1,9 @@
+import openai_utils
+import logging
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 def tokens(t):
     import tiktoken
     tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -37,3 +43,34 @@ def summarize(text,max_tokens):
         return " ".join(words[:firstWords]) 
     return text
 
+def summarize2(text,max_tokens):
+    import math
+    import textwrap
+    t=tokens(text)
+    logger.info(f"summarizing text with {t} tokens")
+    if t<max_tokens:
+        return text
+    factor=t/max_tokens
+
+    chunkSize=math.ceil(len(text)/factor)
+    chunks = textwrap.wrap(text, chunkSize)
+
+    wordCount=len(text.split(" "))
+    chunkWordCount=math.ceil(wordCount/factor)
+
+    result = list()
+    count = 0
+    for chunk in chunks:
+        logger.info(f"summarizing chunk {count+1}/{len(chunks)} with {t} tokens")
+        count = count + 1
+        promp=f"""
+        Fasse den Text auf maximal {chunkWordCount} Wörter zusammen. Lasse keine wichtigen Informationen weg.
+
+        Text:
+
+        {chunk}
+        """
+        summary = openai_utils.complete(promp,"",chunkWordCount)
+        result.append(summary)
+
+    return summarize(" ".join(result),max_tokens)

@@ -196,7 +196,82 @@ async def stream_response(gen, update: Update, context: CallbackContext, parse_m
   return answer, n_used_tokens, n_first_dialog_messages_removed
 
 
-async def handle_pdf(update: Update, context: CallbackContext):
+async def handle_yt(update: Update, context: CallbackContext,url):
+  await update.message.reply_text("Analyzing video...")
+  description, transcript = tools.yt(url)
+  logger.info(description)
+  logger.info(tools.tokens(description))
+  logger.info(tools.tokens(transcript))
+  await reset_dialog_handle(update, context)
+  transcript = tools.summarize2(transcript, 10000)
+  return f'''{description}
+    Analysiere folgendes Video. Fasse die Beschreibung, oder das  Transscript falls es keine Beschreibung gibt,
+    in einem Absatz mit maximal 40 Wörter zusammen.
+
+    Beschreibung: 
+    """
+    {description}
+    """
+
+    Transscript: 
+    """
+    {transcript}
+    """
+    '''
+
+async def handle_txt(update: Update, context: CallbackContext):
+  await reset_dialog_handle(update, context)
+  await update.message.reply_text("Analyzing text...")
+  new_file = await update.message.effective_attachment.get_file()
+  await new_file.download_to_drive('tmp.txt')
+  with open('tmp.txt', 'r') as txt_file:
+    txt=txt_file.read()
+    txt = tools.summarize2(txt, 10000)
+    return f'''
+        Analysiere folgenden Text. Fasse es in einem Absatz mit maximal 40 Wörter zusammen.
+
+        """
+        {txt}
+        """
+        '''
+
+async def handle_url_pdf(url: str):
+  import requests
+  import tempfile
+  response = requests.get(url)
+  with tempfile.TemporaryFile('w+b') as f:
+    f.write(response.content)
+    return await handle_file_pdf(f)
+
+async def handle_doc_pdf(update: Update, context: CallbackContext):
+  await reset_dialog_handle(update, context)
+  await update.message.reply_text("Analyzing pdf...")
+  new_file = await update.message.effective_attachment.get_file()
+  await new_file.download_to_drive('file.pdf')
+  # await update.message.document.get_file().download_to_drive('file.pdf');
+  with open('file.pdf', 'rb') as pdf_file:
+    return await handle_file_pdf(pdf_file)
+
+async def handle_file_pdf(pdf_file):
+  read_pdf = PyPDF2.PdfReader(pdf_file)
+  text_file = ''
+  number_of_pages = len(read_pdf.pages)
+  for page_number in range(number_of_pages):   # use xrange in Py2
+    page = read_pdf.pages[page_number]
+    page_content = page.extract_text() 
+    text_file += page_content
+  text_file = tools.summarize2(text_file, 10000)
+  return f'''
+      Analysiere folgendes PDF. Erstelle ein Inhaltsverzeichnus und eine Zusammenfassung .
+
+      """
+      {text_file}
+      """
+      '''
+
+
+
+async def handle_doc_pd2(update: Update, context: CallbackContext):
   text_file = ''
   await reset_dialog_handle(update, context)
   await update.message.reply_text("Analyzing pdf...")
@@ -219,30 +294,6 @@ async def handle_pdf(update: Update, context: CallbackContext):
         {text_file}
         """
         '''
-
-
-async def handle_yt(update: Update, context: CallbackContext,url):
-  await update.message.reply_text("Analyzing video...")
-  description, transcript = tools.yt(url)
-  logger.info(description)
-  logger.info(tools.tokens(description))
-  logger.info(tools.tokens(transcript))
-  await reset_dialog_handle(update, context)
-  transcript = tools.summarize(transcript, 10000)
-  return f'''{description}
-    Analysiere folgendes Video. Fasse die Beschreibung, oder das  Transscript falls es keine Beschreibung gibt,
-    in einem Absatz mit maximal 40 Wörter zusammen.
-
-    Beschreibung: 
-    """
-    {description}
-    """
-
-    Transscript: 
-    """
-    {transcript}
-    """
-    '''
 
 
 async def message_handle(update: Update, context: CallbackContext, message=None, use_new_dialog_timeout=True, tts=False):
@@ -270,15 +321,24 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
     try:
       if update.message.document is not None:
+        db.start_new_dialog(user_id)
         fn = update.message.document.file_name
         if fn.endswith('.pdf'):
-          message = await handle_pdf(update, context)
+          message = await handle_doc_pdf(update, context)
+        elif fn.endswith('.md'):
+          message = await handle_txt(update, context)
+        else:
+          message = "Unbekanntes Format"
 
       else:
         message = message or update.message.text
         logger.info(message)
-        if message.startswith('https://www.youtube.com/watch?v=') or message.startswith('https://youtu.be/'):
-          message = await handle_yt(update, context,message)
+        if message.startswith('https://'):
+          db.start_new_dialog(user_id)
+          if message.startswith('https://www.youtube.com/watch?v=') or message.startswith('https://youtu.be/'):
+            message = await handle_yt(update, context,message)
+          elif message.startswith('https://') and message.endswith('.pdf'):
+            message = await handle_url_pdf(message)
 
       dialog_messages = db.get_dialog_messages(user_id, dialog_id=None)
       parse_mode = {
@@ -483,7 +543,9 @@ def run_bot() -> None:
 
   application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter, message_handle))
   application.add_handler(MessageHandler(filters.Document.PDF & ~filters.COMMAND & user_filter, message_handle))
+  application.add_handler(MessageHandler(filters.Document.FileExtension("md") & ~filters.COMMAND & user_filter, message_handle))
 
+  
   application.add_handler(CommandHandler("retry", retry_handle, filters=user_filter))
   application.add_handler(CommandHandler("speek", speek_handle, filters=user_filter))
   application.add_handler(CommandHandler("new", new_dialog_handle, filters=user_filter))
