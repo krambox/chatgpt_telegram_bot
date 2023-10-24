@@ -89,6 +89,9 @@ You can be in this list: <a href="https://github.com/karfly/chatgpt_telegram_bot
 
 
 
+sudo su -
 cd /volume1/docker/chatgpt_telegram_bot/
-docker-compose --env-file config/config.env up --build
 docker-compose --env-file config/config.env up --build -d
+
+docker-compose --env-file config/config.env up --build
+
